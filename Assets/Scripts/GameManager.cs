@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using DG.Tweening;
 using Ludu.UI;
 
 namespace Ludu.Core
@@ -62,6 +63,7 @@ namespace Ludu.Core
         public GameType CurrentGameType => gameType;
 
         private List<Pawn> _highlightedPawns = new List<Pawn>();
+        private Tween _pulseTween; // drives every highlighted pawn's scale together, in lockstep
 
         private void Awake()
         {
@@ -349,6 +351,7 @@ namespace Ludu.Core
             RefreshTileStack(movedPawn.CurrentTile);
 
             bool captured = CheckCaptures(movedPawn);
+            bool reachedGoal = movedPawn.IsFinished;
 
             if (CheckWinCondition(CurrentTurn))
             {
@@ -357,7 +360,7 @@ namespace Ludu.Core
                 return;
             }
 
-            if (CurrentRollValue == 6 || captured)
+            if (CurrentRollValue == 6 || captured || reachedGoal)
             {
                 CurrentState = TurnState.WaitingForRoll;
                 UpdateUI();
@@ -427,14 +430,77 @@ namespace Ludu.Core
         {
             ClearHighlights();
             _highlightedPawns = pawns;
+
             foreach (var p in _highlightedPawns)
-                if (p != null) p.SetHighlighted(true);
+                if (p != null) p.BeginHighlight();
+
+            StartSyncedPulse();
+        }
+
+        /// <summary>
+        /// Drives every currently-highlighted pawn's pulse scale from ONE shared
+        /// tween (instead of each pawn looping independently), so they all pulse
+        /// up and down perfectly together.
+        /// </summary>
+        private void StartSyncedPulse()
+        {
+            _pulseTween?.Kill();
+            if (_highlightedPawns.Count == 0) return;
+
+            Pawn reference = _highlightedPawns.Find(p => p != null);
+            if (reference == null) return;
+
+            _pulseTween = DOTween.To(() => 1f, ApplyPulseToHighlighted,
+                    reference.HighlightScaleMultiplier, reference.HighlightPulseDuration)
+                .SetEase(Ease.InOutSine)
+                .SetLoops(-1, LoopType.Yoyo);
+        }
+
+        private void ApplyPulseToHighlighted(float multiplier)
+        {
+            foreach (var p in _highlightedPawns)
+                if (p != null) p.ApplyPulseScale(multiplier);
         }
 
         private void ClearHighlights()
         {
-            foreach (var p in _highlightedPawns)
-                if (p != null) p.SetHighlighted(false);
+            _pulseTween?.Kill();
+            _pulseTween = null;
+
+            if (_highlightedPawns.Count > 0)
+            {
+                var settlingPawns = new List<Pawn>(_highlightedPawns);
+                Pawn reference = settlingPawns.Find(p => p != null);
+
+                if (reference != null)
+                {
+                    // Read whatever multiplier the shared pulse was at when it got
+                    // interrupted, then ease every one of these pawns from there
+                    // down to their initial size (1x) together, on the same tween,
+                    // so they all land back at their initial size at the same moment.
+                    float startMultiplier = reference.transform.localScale.x /
+                        Mathf.Max(0.0001f, reference.BaseScale.x);
+
+                    DOTween.To(() => startMultiplier,
+                            t =>
+                            {
+                                foreach (var p in settlingPawns)
+                                    if (p != null) p.ApplyPulseScale(t);
+                            },
+                            1f, reference.HighlightResetDuration)
+                        .SetEase(Ease.OutQuad)
+                        .OnComplete(() =>
+                        {
+                            foreach (var p in settlingPawns)
+                            {
+                                if (p == null) continue;
+                                p.EndHighlight();
+                                p.RefreshStackVisual(); // re-shrink if it shares its tile with another pawn
+                            }
+                        });
+                }
+            }
+
             _highlightedPawns.Clear();
         }
 
@@ -571,6 +637,24 @@ namespace Ludu.Core
                 case PlayerColor.Blue: return slBluePawn;
                 default: return null;
             }
+        }
+
+        /// <summary>
+        /// Called when the player backs out of an in-progress or finished match via a
+        /// Home button (either the in-game HUD Home button, or the WinScreen Home button).
+        /// Stops any pending bot turn, kills pawn highlight tweens, unsubscribes dice
+        /// events, and drops the state back to MainMenu so a later StartGame() call
+        /// (from selecting a mode again) starts clean.
+        /// </summary>
+        public void ReturnToMenu()
+        {
+            CancelInvoke(nameof(BotRoll));
+            ClearHighlights();
+
+            if (ludoDice != null) ludoDice.OnDiceRolled -= OnLudoDiceRolled;
+            if (slDice != null) slDice.OnDiceRolled -= OnSlDiceRolled;
+
+            CurrentState = TurnState.MainMenu;
         }
     }
 }

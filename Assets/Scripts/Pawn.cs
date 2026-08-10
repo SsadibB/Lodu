@@ -43,7 +43,6 @@ namespace Ludu.Core
         private Image pawnImage;
         private Vector3 baseScale = Vector3.one;
         private Vector3 targetStackScale = Vector3.one; // the scale this pawn should rest at (shrinks when 2+ pawns share its tile)
-        private Tween highlightTween;
         private Tween moveTween;
         private Tween stackTween;
         private bool isHighlighted;
@@ -110,7 +109,7 @@ namespace Ludu.Core
             isInYard = true;
             currentPathIndex = -1;
             IsFinished = false;
-            SetHighlighted(false);
+            EndHighlight();
             moveTween?.Kill();
             stackTween?.Kill();
             transform.position = defaultYardPosition != null ? defaultYardPosition.position : originalYardPosition;
@@ -124,29 +123,43 @@ namespace Ludu.Core
         /// </summary>
         public void CapturedReturnToYard(Action onComplete = null)
         {
-            SetHighlighted(false);
+            EndHighlight();
             if (moveCoroutine != null) StopCoroutine(moveCoroutine);
             moveTween?.Kill();
             stackTween?.Kill();
-            moveCoroutine = StartCoroutine(CapturedReturnRoutine(onComplete));
+
+            // Snapshot the tiles to hop back through for the visual walk, THEN
+            // immediately flip the game-logic state (isInYard / currentPathIndex /
+            // IsFinished) to "in yard". Previously this state was only set at the
+            // very end of the hop-back coroutine, so for the ~1+ second the pawn
+            // was animating home, it still looked like it was occupying a board
+            // tile (IsInYard == false, CurrentTile pointing mid-path) to every
+            // other capture/stack check that ran during that window — turns don't
+            // wait for this animation. That stale window is what let a pawn dodge
+            // being captured again later: it could get miscounted as still on a
+            // tile, e.g. forming a false 2-pawn "protected block" with itself.
+            List<TileNode> returnWaypoints = new List<TileNode>();
+            for (int i = currentPathIndex - 1; i >= 0; i--)
+                if (assignedPath[i] != null) returnWaypoints.Add(assignedPath[i]);
+
+            isInYard = true;
+            currentPathIndex = -1;
+            IsFinished = false;
+
+            moveCoroutine = StartCoroutine(CapturedReturnRoutine(returnWaypoints, onComplete));
         }
 
-        private IEnumerator CapturedReturnRoutine(Action onComplete)
+        private IEnumerator CapturedReturnRoutine(List<TileNode> returnWaypoints, Action onComplete)
         {
-            for (int i = currentPathIndex - 1; i >= 0; i--)
+            foreach (TileNode tile in returnWaypoints)
             {
-                if (assignedPath[i] == null) continue;
-                Vector3 target = GetLandingPosition(assignedPath[i]);
+                Vector3 target = GetLandingPosition(tile);
                 yield return HopTo(target, captureReturnStepDuration);
-                currentPathIndex = i;
             }
 
             Vector3 yardTarget = defaultYardPosition != null ? defaultYardPosition.position : originalYardPosition;
             yield return HopTo(yardTarget, captureReturnStepDuration);
 
-            isInYard = true;
-            currentPathIndex = -1;
-            IsFinished = false;
             moveCoroutine = null;
             onComplete?.Invoke();
         }
@@ -309,31 +322,53 @@ namespace Ludu.Core
             }
         }
 
+        // ---------------------------------------------------------------
+        // Turn Highlight — the actual pulsing tween lives in GameManager,
+        // which drives every currently-movable pawn's scale from ONE shared
+        // tween. That's what keeps them pulsing perfectly in sync and, when
+        // the highlight ends, landing on their initial size at the exact
+        // same moment — instead of each pawn running its own independent
+        // loop (which drifts out of phase) and settling on its own schedule.
+        // ---------------------------------------------------------------
+
+        public Vector3 BaseScale => baseScale;
+        public float HighlightScaleMultiplier => highlightScaleMultiplier;
+        public float HighlightPulseDuration => highlightPulseDuration;
+        public float HighlightResetDuration => highlightResetDuration;
+        public bool IsHighlighted => isHighlighted;
+
         /// <summary>
         /// Called by GameManager when it's this pawn's turn and it's a legal move.
-        /// While highlighted, the pawn pulses (loops scale up/down) and stays on top of
-        /// the sibling order so it's clearly visible and clickable even if stacked.
+        /// Just flags the pawn as highlighted and brings it in front of any stack —
+        /// the actual pulsing scale is driven externally (see GameManager) so every
+        /// highlighted pawn shares one synced tween.
         /// </summary>
-        public void SetHighlighted(bool highlighted)
+        public void BeginHighlight()
         {
-            if (isHighlighted == highlighted) return;
-            isHighlighted = highlighted;
-
-            highlightTween?.Kill();
+            if (isHighlighted) return;
+            isHighlighted = true;
             stackTween?.Kill();
+            transform.SetAsLastSibling(); // render on top of the stack
+        }
 
-            if (highlighted)
-            {
-                transform.SetAsLastSibling(); // render on top of the stack
-                highlightTween = transform.DOScale(baseScale * highlightScaleMultiplier, highlightPulseDuration)
-                    .SetEase(Ease.InOutSine)
-                    .SetLoops(-1, LoopType.Yoyo);
-            }
-            else
-            {
-                highlightTween = transform.DOScale(targetStackScale, highlightResetDuration)
-                    .SetEase(Ease.OutQuad);
-            }
+        /// <summary>
+        /// Called once the shared settle-tween (driven by GameManager) has brought
+        /// this pawn back to its initial size, so it's no longer treated as
+        /// highlighted by RefreshStackVisual.
+        /// </summary>
+        public void EndHighlight()
+        {
+            isHighlighted = false;
+        }
+
+        /// <summary>
+        /// Applies a scale multiplier of baseScale directly — used by GameManager's
+        /// shared pulse/settle tween so every highlighted pawn reads the exact same
+        /// multiplier on the exact same frame.
+        /// </summary>
+        public void ApplyPulseScale(float scaleMultiplier)
+        {
+            transform.localScale = baseScale * scaleMultiplier;
         }
     }
 }
