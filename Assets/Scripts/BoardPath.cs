@@ -56,7 +56,8 @@ namespace Ludu.Core
             }
 
             int totalCommon = commonPathNodes.Count;
-            for (int i = 0; i < totalCommon; i++)
+            int commonStepsToTravel = totalCommon > 0 ? totalCommon - 1 : 0; // 51 of the 52 shared tiles, then turn into the home column
+            for (int i = 0; i < commonStepsToTravel; i++)
             {
                 int nodeIdx = (startIndex + i) % totalCommon;
                 fullPath.Add(commonPathNodes[nodeIdx]);
@@ -114,6 +115,25 @@ namespace Ludu.Core
                 case PlayerColor.Blue: return blueYardNodes;
                 default: return redYardNodes;
             }
+        }
+
+        /// <summary>
+        /// Returns the yard slot TileNode for a specific pawn index (0-3) of a color.
+        /// Logs a clear warning if that slot hasn't been wired up in the Inspector yet,
+        /// instead of silently returning null and leaving pawns with nowhere to return to.
+        /// </summary>
+        public TileNode GetYardNode(PlayerColor color, int pawnIndex)
+        {
+            List<TileNode> yardNodes = GetYardNodes(color);
+
+            if (yardNodes == null || pawnIndex < 0 || pawnIndex >= yardNodes.Count || yardNodes[pawnIndex] == null)
+            {
+                Debug.LogWarning($"[BoardPath] {color} yard slot [{pawnIndex}] is not assigned. " +
+                    $"Select this BoardPath object and assign a TileNode into '{color} Player Waypoints > Yard Nodes[{pawnIndex}]'.");
+                return null;
+            }
+
+            return yardNodes[pawnIndex];
         }
     }
 }

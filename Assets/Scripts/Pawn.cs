@@ -19,6 +19,7 @@ namespace Ludu.Core
 
         [Header("Stacking (multiple pawns sharing one tile)")]
         [SerializeField] private float stackOffsetDistance = 14f;
+        [SerializeField] private float stackedScaleMultiplier = 0.65f; // shrink applied to every pawn when 2+ share a tile
 
         [Header("Turn Highlight (pulsing scale + come forward)")]
         [SerializeField] private float highlightScaleMultiplier = 1.35f;
@@ -28,6 +29,7 @@ namespace Ludu.Core
         [Header("Move Animation (hop between tiles)")]
         [SerializeField] private float jumpPower = 30f;
         [SerializeField] private float stepDuration = 0.18f;
+        [SerializeField] private float captureReturnStepDuration = 0.08f; // faster hops when walking back to the yard after being captured
 
         [Header("State (Read-only)")]
         [SerializeField] private bool isInYard = true;
@@ -40,8 +42,10 @@ namespace Ludu.Core
         private Button pawnButton;
         private Image pawnImage;
         private Vector3 baseScale = Vector3.one;
+        private Vector3 targetStackScale = Vector3.one; // the scale this pawn should rest at (shrinks when 2+ pawns share its tile)
         private Tween highlightTween;
         private Tween moveTween;
+        private Tween stackTween;
         private bool isHighlighted;
 
         public PlayerColor Color => color;
@@ -59,6 +63,7 @@ namespace Ludu.Core
             pawnImage = GetComponent<Image>();
             pawnButton = GetComponent<Button>();
             baseScale = transform.localScale;
+            targetStackScale = baseScale;
             originalYardPosition = transform.position; // its spot inside InnerYardBox, set by CanvasBoardGenerator
 
             if (pawnButton != null)
@@ -107,6 +112,7 @@ namespace Ludu.Core
             IsFinished = false;
             SetHighlighted(false);
             moveTween?.Kill();
+            stackTween?.Kill();
             transform.position = defaultYardPosition != null ? defaultYardPosition.position : originalYardPosition;
         }
 
@@ -121,6 +127,7 @@ namespace Ludu.Core
             SetHighlighted(false);
             if (moveCoroutine != null) StopCoroutine(moveCoroutine);
             moveTween?.Kill();
+            stackTween?.Kill();
             moveCoroutine = StartCoroutine(CapturedReturnRoutine(onComplete));
         }
 
@@ -130,12 +137,12 @@ namespace Ludu.Core
             {
                 if (assignedPath[i] == null) continue;
                 Vector3 target = GetLandingPosition(assignedPath[i]);
-                yield return HopTo(target);
+                yield return HopTo(target, captureReturnStepDuration);
                 currentPathIndex = i;
             }
 
             Vector3 yardTarget = defaultYardPosition != null ? defaultYardPosition.position : originalYardPosition;
-            yield return HopTo(yardTarget);
+            yield return HopTo(yardTarget, captureReturnStepDuration);
 
             isInYard = true;
             currentPathIndex = -1;
@@ -155,10 +162,26 @@ namespace Ludu.Core
             return (currentPathIndex + steps) < assignedPath.Count;
         }
 
+        /// <summary>
+        /// Returns the tile this pawn would land on if it moved <paramref name="steps"/>
+        /// spaces right now, WITHOUT actually moving it. Used by the bot AI to score
+        /// candidate moves before picking one. Returns null if there's no such tile
+        /// (e.g. exiting the yard on anything but a 6).
+        /// </summary>
+        public TileNode PeekTileAt(int steps)
+        {
+            if (isInYard)
+                return (steps == 6 && assignedPath.Count > 0) ? assignedPath[0] : null;
+
+            int targetIndex = Mathf.Clamp(currentPathIndex + steps, 0, assignedPath.Count - 1);
+            return (targetIndex >= 0 && targetIndex < assignedPath.Count) ? assignedPath[targetIndex] : null;
+        }
+
         public void MovePawn(int steps, Action onComplete)
         {
             if (moveCoroutine != null) StopCoroutine(moveCoroutine);
             moveTween?.Kill();
+            stackTween?.Kill();
             moveCoroutine = StartCoroutine(MoveRoutine(steps, onComplete));
         }
 
@@ -207,11 +230,12 @@ namespace Ludu.Core
         /// <summary>
         /// Hops the pawn to targetPos with a small arc (jump effect) instead of sliding flat.
         /// </summary>
-        private IEnumerator HopTo(Vector3 targetPos)
+        private IEnumerator HopTo(Vector3 targetPos, float? duration = null)
         {
             moveTween?.Kill();
+            stackTween?.Kill();
             bool done = false;
-            moveTween = transform.DOJump(targetPos, jumpPower, 1, stepDuration)
+            moveTween = transform.DOJump(targetPos, jumpPower, 1, duration ?? stepDuration)
                 .SetEase(Ease.Linear)
                 .OnComplete(() => done = true);
 
@@ -242,6 +266,33 @@ namespace Ludu.Core
             return tile.transform.position + (Vector3)offset;
         }
 
+        /// <summary>
+        /// Re-settles this pawn into its correct stacking slot (position + size) based on
+        /// how many pawns are on its current tile right now. Called by GameManager whenever
+        /// the stack on a tile might have changed — a pawn arrived, left, or got captured —
+        /// so the survivors shrink/grow and re-fan automatically.
+        /// </summary>
+        public void RefreshStackVisual()
+        {
+            if (isInYard || CurrentTile == null || GameManager.Instance == null) return;
+            if (moveCoroutine != null) return; // don't fight an in-progress hop
+
+            List<Pawn> allOnTile = GameManager.Instance.GetPawnsOnTile(CurrentTile, null); // includes self
+            int totalCount = allOnTile.Count;
+            int myIndex = Mathf.Max(0, allOnTile.IndexOf(this));
+
+            targetStackScale = totalCount >= 2 ? baseScale * stackedScaleMultiplier : baseScale;
+            Vector2 offset = totalCount >= 2 ? GetStackSlotOffset(myIndex) : Vector2.zero;
+            Vector3 targetPos = CurrentTile.transform.position + (Vector3)offset;
+
+            stackTween?.Kill();
+            Sequence seq = DOTween.Sequence();
+            seq.Join(transform.DOMove(targetPos, 0.2f).SetEase(Ease.OutQuad));
+            if (!isHighlighted)
+                seq.Join(transform.DOScale(targetStackScale, 0.2f).SetEase(Ease.OutQuad));
+            stackTween = seq;
+        }
+
         private Vector2 GetStackSlotOffset(int slotIndex)
         {
             // Alone on the tile: dead center, no offset.
@@ -269,6 +320,7 @@ namespace Ludu.Core
             isHighlighted = highlighted;
 
             highlightTween?.Kill();
+            stackTween?.Kill();
 
             if (highlighted)
             {
@@ -279,7 +331,7 @@ namespace Ludu.Core
             }
             else
             {
-                highlightTween = transform.DOScale(baseScale, highlightResetDuration)
+                highlightTween = transform.DOScale(targetStackScale, highlightResetDuration)
                     .SetEase(Ease.OutQuad);
             }
         }

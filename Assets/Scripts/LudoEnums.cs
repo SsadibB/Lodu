@@ -14,6 +14,12 @@ namespace Ludu.Core
         FourPlayer   // Red, Green, Yellow, Blue
     }
 
+    public enum GameType
+    {
+        SnakeAndLadder,
+        Ludo
+    }
+
     public enum TileType
     {
         Normal,
