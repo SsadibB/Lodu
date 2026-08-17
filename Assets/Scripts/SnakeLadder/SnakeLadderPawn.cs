@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using DG.Tweening;
 
 namespace Ludu.Core
@@ -28,6 +29,9 @@ namespace Ludu.Core
         [SerializeField] private float stackOffsetDistance = 14f;
         [SerializeField] private float stackedScaleMultiplier = 0.65f;
 
+        [Tooltip("Fraction of the normal corner-fan spacing used only for the pawns' starting positions on cell 1, so they sit together in the middle instead of spread to the corners. 0 = perfectly centered/stacked on top of each other; 1 = same spread as normal mid-game stacking.")]
+        [SerializeField] private float startStackOffsetScale = 0.25f;
+
         [Header("Step Hop Animation")]
         [SerializeField] private float stepDuration = 0.28f;
         [SerializeField] private float jumpPower = 15f;
@@ -47,13 +51,43 @@ namespace Ludu.Core
         private Vector3 baseScale = Vector3.one;
         private Vector3 targetStackScale = Vector3.one;
         private Tween stackTween;
-        private RectTransform rectTransform;
+        private RectTransform _rectTransform;
+        private bool baseScaleCaptured;
+
+        /// <summary>
+        /// Lazily resolved instead of only being cached in Awake(). GameManager calls
+        /// SetBoard()/SnapToStart() on pawns that may still be inactive (e.g. Green/Yellow
+        /// in a 2-player game) - an inactive GameObject's Awake() hasn't run yet, so a
+        /// plain Awake-only cache would still be null here and throw a NullReferenceException.
+        /// </summary>
+        private RectTransform rectTransform
+        {
+            get
+            {
+                if (_rectTransform == null) _rectTransform = transform as RectTransform;
+                return _rectTransform;
+            }
+        }
 
         private void Awake()
         {
+            CaptureBaseScaleIfNeeded();
+            _rectTransform = transform as RectTransform;
+        }
+
+        /// <summary>
+        /// Grabs the pawn's authored (prefab/editor) scale exactly once, before anything
+        /// ever rescales it for stacking. Must run even if this pawn is still inactive when
+        /// SnapToStart()/ApplyStackTransform() first fire (e.g. an unused Green/Yellow pawn
+        /// in a 2-player game) - otherwise Awake() hasn't captured it yet and the stack math
+        /// would fall back to a default of (1,1,1) instead of the real authored scale.
+        /// </summary>
+        private void CaptureBaseScaleIfNeeded()
+        {
+            if (baseScaleCaptured) return;
             baseScale = transform.localScale;
             targetStackScale = baseScale;
-            rectTransform = transform as RectTransform;
+            baseScaleCaptured = true;
         }
 
         private void Start()
@@ -73,9 +107,10 @@ namespace Ludu.Core
                 SnapToStart();
         }
 
-        /// <summary>Places the pawn on cell 1, locked, fanned/shrunk according to how many other pawns are already there.</summary>
+        /// <summary>Places the pawn on cell 1, locked, shrunk and tucked in tight near the middle of that cell alongside any other pawns already there.</summary>
         public void SnapToStart()
         {
+            CaptureBaseScaleIfNeeded();
             HasEntered = false;
             CurrentCell = 1;
 
@@ -86,6 +121,7 @@ namespace Ludu.Core
         /// <summary>Instantly places the pawn directly on a board cell, unlocked. Useful for manual testing/resets.</summary>
         public void SnapToCell(int cell)
         {
+            CaptureBaseScaleIfNeeded();
             int max = board != null ? board.TotalCells : 100;
             HasEntered = true;
             CurrentCell = Mathf.Clamp(cell, 1, max);
@@ -284,11 +320,34 @@ namespace Ludu.Core
         /// mid-game restacking (RefreshStackVisual, animated): counts how many active
         /// pawns share this cell right now and settles this pawn into the correct
         /// shrunk + fanned slot, or dead center if it's alone.
+        /// Cell 1 always targets the board's own first-cell rect (never a separate marker),
+        /// using the tighter startStackOffsetScale spacing so multiple pawns sit tucked
+        /// together in its middle - this applies to every caller that targets cell 1, not
+        /// just SnapToStart, so a pawn parked there stays visually put (no jump) even when
+        /// RefreshStackVisual() fires on the entry-roll unlock, since CurrentCell is still 1
+        /// at that point.
         /// </summary>
         private void ApplyStackTransform(int cell, bool animate)
         {
             RectTransform cellTransform = board != null ? board.GetCellTransform(cell) : null;
             if (cellTransform == null) return;
+
+            if (!animate)
+            {
+                // Instant snaps (SnapToStart/SnapToCell) can fire before a pending Layout
+                // Group (e.g. Grid Layout Group on Snake&LadderBoardContainer) has arranged
+                // its cells - Unity defers that rebuild to end-of-frame. Force it now so
+                // cellTransform's rect/anchoredPosition is already settled before we read it.
+                if (cellTransform.parent is RectTransform parentRect)
+                    LayoutRebuilder.ForceRebuildLayoutImmediate(parentRect);
+            }
+
+            Debug.Log($"[SLPawn-DEBUG] {name}: cell {cell} -> rect '{cellTransform.name}' " +
+                      $"worldCenter={GetRectCenterWorld(cellTransform)} " +
+                      $"localPos={cellTransform.localPosition} anchoredPos={cellTransform.anchoredPosition} " +
+                      $"lossyScale={cellTransform.lossyScale} parentChain={DescribeParentChain(cellTransform)}");
+
+            float offsetScale = cell == 1 ? startStackOffsetScale : 1f;
 
             int totalCount = 1;
             int myIndex = 0;
@@ -300,7 +359,7 @@ namespace Ludu.Core
             }
 
             targetStackScale = totalCount >= 2 ? baseScale * stackedScaleMultiplier : baseScale;
-            Vector2 offset = totalCount >= 2 ? GetStackSlotOffset(myIndex) : Vector2.zero;
+            Vector2 offset = totalCount >= 2 ? GetStackSlotOffset(myIndex) * offsetScale : Vector2.zero;
 
             // Pivot correction must reflect the scale the pawn is ABOUT to have, not its
             // current one, or the final landed position drifts slightly whenever the stack
@@ -327,6 +386,18 @@ namespace Ludu.Core
                 transform.position = targetPos;
                 transform.localScale = targetStackScale;
             }
+        }
+
+        private static string DescribeParentChain(Transform t)
+        {
+            var sb = new System.Text.StringBuilder();
+            Transform current = t;
+            while (current != null)
+            {
+                sb.Append($"[{current.name}: localScale={current.localScale}, localRot={current.localEulerAngles}] <- ");
+                current = current.parent;
+            }
+            return sb.ToString();
         }
 
         private Vector2 GetStackSlotOffset(int slotIndex)

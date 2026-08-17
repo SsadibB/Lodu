@@ -4658,7 +4658,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &223801625
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4732,6 +4732,7 @@ MonoBehaviour:
   entryRoll: 6
   stackOffsetDistance: 14
   stackedScaleMultiplier: 0.65
+  startStackOffsetScale: 0.25
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
@@ -17701,7 +17702,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &917796442
 RectTransform:
   m_ObjectHideFlags: 0
@@ -17775,6 +17776,7 @@ MonoBehaviour:
   entryRoll: 6
   stackOffsetDistance: 14
   stackedScaleMultiplier: 0.65
+  startStackOffsetScale: 0.25
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
@@ -22732,7 +22734,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1224492687
 RectTransform:
   m_ObjectHideFlags: 0
@@ -22806,6 +22808,7 @@ MonoBehaviour:
   entryRoll: 6
   stackOffsetDistance: 14
   stackedScaleMultiplier: 0.65
+  startStackOffsetScale: 0.5
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
@@ -37257,7 +37260,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1960170183
 RectTransform:
   m_ObjectHideFlags: 0
@@ -37331,6 +37334,7 @@ MonoBehaviour:
   entryRoll: 6
   stackOffsetDistance: 14
   stackedScaleMultiplier: 0.65
+  startStackOffsetScale: 0.25
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
