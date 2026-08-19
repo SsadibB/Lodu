@@ -26,20 +26,28 @@ namespace Ludu.Core
         [SerializeField] private int entryRoll = 6;
 
         [Header("Stacking (multiple pawns sharing one cell)")]
-        [SerializeField] private float stackOffsetDistance = 14f;
+        [SerializeField] private float stackOffsetDistance = 20f;
         [SerializeField] private float stackedScaleMultiplier = 0.65f;
 
-        [Tooltip("Fraction of the normal corner-fan spacing used only for the pawns' starting positions on cell 1, so they sit together in the middle instead of spread to the corners. 0 = perfectly centered/stacked on top of each other; 1 = same spread as normal mid-game stacking.")]
-        [SerializeField] private float startStackOffsetScale = 0.25f;
+        [Tooltip("Distance (in the same units as Stack Offset Distance) each pawn is pushed off-center at the very start on cell 1, so all 4 sit in their own visible corner instead of overlapping and hiding one another. 0 = perfectly stacked on top of each other (pawns WILL hide behind one another); the default matches the normal mid-game fan spacing so all 4 are clearly visible from the first frame. Raise it if pawns still overlap on your board, lower it if you want them tucked tighter together.")]
+        [SerializeField] private float startStackOffsetScale = 0.5f;
 
         [Header("Step Hop Animation")]
         [SerializeField] private float stepDuration = 0.28f;
         [SerializeField] private float jumpPower = 15f;
 
         [Header("Ladder Climb / Snake Slide Animation")]
+        [Tooltip("Pause after landing on a snake/ladder's starting cell, before the climb/slide begins.")]
         [SerializeField] private float connectorPauseDuration = 0.35f;
-        [SerializeField] private float ladderClimbDuration = 0.8f;
-        [SerializeField] private float snakeSlideDuration = 0.7f;
+
+        [Tooltip("How fast the pawn climbs a ladder, in canvas units per second (same units as Stack Offset Distance). The travel time scales with how long the ladder's path actually is (including any Path Points pointers), so short and long ladders both move at this same pace instead of the long one rushing to fit a fixed time. Lower = slower climb, higher = faster.")]
+        [SerializeField] private float ladderClimbSpeed = 260f;
+
+        [Tooltip("How fast the pawn slides down a snake, in canvas units per second. Same idea as Ladder Climb Speed - the travel time scales with the snake's actual path length (including any Path Points pointers), so a long snake takes proportionally longer at this pace instead of rushing. Lower = slower slide, higher = faster.")]
+        [SerializeField] private float snakeSlideSpeed = 260f;
+
+        [Tooltip("Safety floor, in seconds, so a very short ladder/snake (or one with no Path Points assigned) never finishes instantly regardless of speed.")]
+        [SerializeField] private float minConnectorDuration = 0.25f;
 
         public int CurrentCell { get; private set; } = 1;
         public bool HasEntered { get; private set; } = false; // true once unlocked and free to move
@@ -205,19 +213,43 @@ namespace Ludu.Core
             yield return new WaitForSeconds(connectorPauseDuration);
 
             Vector3 destTarget = GetLandingPosition(connector.toCell);
+            List<Vector3> waypoints = BuildConnectorWaypoints(connector, destTarget);
 
             if (connector.IsLadder)
             {
-                Debug.Log($"[SnakeLadderPawn] Climbing ladder {connector.fromCell} -> {connector.toCell}");
-                yield return ClimbLadder(destTarget);
+                Debug.Log($"[SnakeLadderPawn] Climbing ladder {connector.fromCell} -> {connector.toCell}" +
+                          (waypoints.Count > 1 ? $" through {waypoints.Count - 1} pointer(s)" : ""));
+                yield return ClimbLadder(waypoints);
             }
             else
             {
-                Debug.Log($"[SnakeLadderPawn] Sliding down snake {connector.fromCell} -> {connector.toCell}");
-                yield return SlideDownSnake(destTarget);
+                Debug.Log($"[SnakeLadderPawn] Sliding down snake {connector.fromCell} -> {connector.toCell}" +
+                          (waypoints.Count > 1 ? $" through {waypoints.Count - 1} pointer(s)" : ""));
+                yield return SlideDownSnake(waypoints);
             }
 
             CurrentCell = connector.toCell;
+        }
+
+        /// <summary>
+        /// Turns a connector's pointer RectTransforms (if any) into this pawn's pivot-corrected
+        /// world-space path, ending at its final landing spot on toCell. A connector with no
+        /// pointers assigned collapses to a single-point path - callers use that to fall back
+        /// to the old direct jump/slide.
+        /// </summary>
+        private List<Vector3> BuildConnectorWaypoints(SnakeOrLadderConnector connector, Vector3 destTarget)
+        {
+            var waypoints = new List<Vector3>();
+            if (connector.pathPoints != null)
+            {
+                foreach (RectTransform point in connector.pathPoints)
+                {
+                    if (point == null) continue;
+                    waypoints.Add(GetRectCenterWorld(point) + GetOwnPivotToCenterOffset());
+                }
+            }
+            waypoints.Add(destTarget);
+            return waypoints;
         }
 
         private IEnumerator Hop(Vector3 targetPos, float duration)
@@ -229,22 +261,61 @@ namespace Ludu.Core
             while (!done) yield return null;
         }
 
-        private IEnumerator ClimbLadder(Vector3 targetPos)
+        /// <summary>
+        /// Climbs a ladder. Travel time is distance / ladderClimbSpeed, so the pawn moves at a
+        /// consistent pace no matter how long the ladder's path is (crucial once Path Points
+        /// are involved - a fixed duration would make a long pointer path look rushed and a
+        /// short one look sluggish). With pointers assigned, glides through them as one smooth
+        /// path; with none, falls back to the original single arc-jump straight to toCell.
+        /// </summary>
+        private IEnumerator ClimbLadder(List<Vector3> waypoints)
         {
+            float distance = GetPathLength(transform.position, waypoints);
+            float duration = Mathf.Max(minConnectorDuration, distance / Mathf.Max(1f, ladderClimbSpeed));
+
             bool done = false;
-            transform.DOJump(targetPos, 40f, 1, ladderClimbDuration)
-                .SetEase(Ease.OutQuad)
-                .OnComplete(() => done = true);
+            Tween tween = waypoints.Count > 1
+                ? transform.DOPath(waypoints.ToArray(), duration, PathType.CatmullRom)
+                    .SetEase(Ease.OutQuad)
+                : transform.DOJump(waypoints[0], 40f, 1, duration)
+                    .SetEase(Ease.OutQuad);
+            tween.OnComplete(() => done = true);
             while (!done) yield return null;
         }
 
-        private IEnumerator SlideDownSnake(Vector3 targetPos)
+        /// <summary>
+        /// Slides down a snake. Travel time is distance / snakeSlideSpeed, for the same reason
+        /// as ClimbLadder - keeps the pace consistent regardless of how long the snake's pointer
+        /// path is. With pointers assigned, glides through them as a smooth path so the pawn
+        /// follows the snake's body instead of cutting straight to toCell; with none, falls back
+        /// to the original direct slide.
+        /// </summary>
+        private IEnumerator SlideDownSnake(List<Vector3> waypoints)
         {
+            float distance = GetPathLength(transform.position, waypoints);
+            float duration = Mathf.Max(minConnectorDuration, distance / Mathf.Max(1f, snakeSlideSpeed));
+
             bool done = false;
-            transform.DOMove(targetPos, snakeSlideDuration)
-                .SetEase(Ease.InQuad)
-                .OnComplete(() => done = true);
+            Tween tween = waypoints.Count > 1
+                ? transform.DOPath(waypoints.ToArray(), duration, PathType.CatmullRom)
+                    .SetEase(Ease.InQuad)
+                : transform.DOMove(waypoints[0], duration)
+                    .SetEase(Ease.InQuad);
+            tween.OnComplete(() => done = true);
             while (!done) yield return null;
+        }
+
+        /// <summary>Total straight-line length of a waypoint path, starting from a given world position.</summary>
+        private static float GetPathLength(Vector3 start, List<Vector3> waypoints)
+        {
+            float length = 0f;
+            Vector3 prev = start;
+            foreach (Vector3 wp in waypoints)
+            {
+                length += Vector3.Distance(prev, wp);
+                prev = wp;
+            }
+            return length;
         }
 
         /// <summary>
