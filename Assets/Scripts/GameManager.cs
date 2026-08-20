@@ -577,10 +577,10 @@ namespace Ludu.Core
 
             int originCell = pawn.CurrentCell;
             CurrentState = TurnState.MovingPawn;
-            pawn.Move(rollValue, () => OnSlPawnMoveCompleted(pawn, originCell));
+            pawn.Move(rollValue, justUnlocked => OnSlPawnMoveCompleted(pawn, originCell, justUnlocked));
         }
 
-        private void OnSlPawnMoveCompleted(SnakeLadderPawn pawn, int originCell)
+        private void OnSlPawnMoveCompleted(SnakeLadderPawn pawn, int originCell, bool justUnlocked)
         {
             RefreshSlCellStack(originCell);
             RefreshSlCellStack(pawn.CurrentCell);
@@ -592,9 +592,11 @@ namespace Ludu.Core
                 return;
             }
 
-            if (CurrentRollValue == 6)
+            if (justUnlocked)
             {
-                // Extra turn: applies whether the 6 unlocked the pawn or moved it forward.
+                // One-time reward: only the roll that gets the pawn out of the start cell
+                // earns an extra roll. A later roll of 6 during normal play just moves the
+                // pawn 6 cells and passes the turn like any other roll.
                 CurrentState = TurnState.WaitingForRoll;
                 UpdateUI();
             }

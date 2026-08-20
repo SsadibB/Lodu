@@ -143,14 +143,17 @@ namespace Ludu.Core
         /// only a roll matching entryRoll (default 6) unlocks it - no hop happens since it's
         /// already there. Once unlocked, any roll moves it forward; overshooting the last
         /// cell forfeits the turn.
+        /// <paramref name="onComplete"/> reports whether this specific roll was the one that
+        /// unlocked the pawn from the starting cell - callers use that (not "rolled a 6") to
+        /// decide whether an extra roll is earned, since only the unlocking roll rewards one.
         /// </summary>
-        public void Move(int steps, Action onComplete = null)
+        public void Move(int steps, Action<bool> onComplete = null)
         {
             if (IsMoving || board == null)
             {
                 if (board == null)
                     Debug.LogWarning("[SnakeLadderPawn] Move() called but board is not assigned. Call SetBoard() first.");
-                onComplete?.Invoke();
+                onComplete?.Invoke(false);
                 return;
             }
 
@@ -159,14 +162,14 @@ namespace Ludu.Core
                 if (steps != entryRoll)
                 {
                     Debug.Log($"[SnakeLadderPawn] Needs a {entryRoll} to unlock - rolled {steps}, staying put.");
-                    onComplete?.Invoke();
+                    onComplete?.Invoke(false);
                     return;
                 }
 
                 HasEntered = true;
-                Debug.Log("[SnakeLadderPawn] Unlocked! Free to move on future rolls.");
+                Debug.Log("[SnakeLadderPawn] Unlocked! Free to move on future rolls. Reward: one extra roll.");
                 RefreshStackVisual();
-                onComplete?.Invoke();
+                onComplete?.Invoke(true); // this roll is what unlocked the pawn - earns the one-time extra roll
                 return;
             }
 
@@ -176,7 +179,7 @@ namespace Ludu.Core
             if (target > maxCell)
             {
                 Debug.Log($"[SnakeLadderPawn] Roll of {steps} overshoots cell {maxCell} from {CurrentCell} - no move this turn.");
-                onComplete?.Invoke();
+                onComplete?.Invoke(false);
                 return;
             }
 
@@ -184,7 +187,7 @@ namespace Ludu.Core
             moveCoroutine = StartCoroutine(MoveRoutine(target, onComplete));
         }
 
-        private IEnumerator MoveRoutine(int target, Action onComplete)
+        private IEnumerator MoveRoutine(int target, Action<bool> onComplete)
         {
             IsMoving = true;
 
@@ -205,7 +208,9 @@ namespace Ludu.Core
 
             IsMoving = false;
             moveCoroutine = null;
-            onComplete?.Invoke();
+            // A regular in-board move never earns the extra-roll reward, even on a rolled 6 -
+            // that reward is reserved for the one roll that unlocks the pawn from the start.
+            onComplete?.Invoke(false);
         }
 
         private IEnumerator ResolveConnector(SnakeOrLadderConnector connector)
@@ -479,7 +484,11 @@ namespace Ludu.Core
                 case 0: return new Vector2(-d, d);
                 case 1: return new Vector2(d, d);
                 case 2: return new Vector2(-d, -d);
-                default: return new Vector2(d, -d);
+                // Slot 3 (Blue, when all 4 pawns share a cell) sat directly under/behind
+                // the other pawns and was getting hidden. Push it further right (1.6x the
+                // normal distance) so it clears the other three instead of just mirroring
+                // Green's x-offset with an opposite y.
+                default: return new Vector2(d , -d);
             }
         }
     }
