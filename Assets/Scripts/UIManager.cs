@@ -7,7 +7,10 @@ namespace Ludu.UI
 {
     public class UIManager : MonoBehaviour
     {
-        [Header("Game Type Selection (shown FIRST)")]
+        [Header("Loading Screen (shown first, before anything else)")]
+        [SerializeField] private LoadingPanel loadingPanel;
+
+        [Header("Game Type Selection (shown after the loading screen)")]
         [SerializeField] private GameObject gameTypePanel;
         [SerializeField] private Button snakeLadderButton;
         [SerializeField] private Button ludoButton;
@@ -88,8 +91,26 @@ namespace Ludu.UI
             if (controlsPanel == null) Debug.LogWarning("[UIManager] controlsPanel not found/assigned - controls won't show.");
             if (homeButton == null) Debug.LogWarning("[UIManager] homeButton not found/assigned - Home button won't function.");
             if (rollDiceButton == null) Debug.LogWarning("[UIManager] rollDiceButton not found/assigned - Roll Dice button won't function.");
+            if (loadingPanel == null) Debug.LogWarning("[UIManager] loadingPanel not found/assigned - the loading screen will be skipped.");
 
-            ShowGameTypeMenu();
+            ShowLoadingScreenThenGameTypeMenu();
+        }
+
+        /// <summary>
+        /// Entry point on launch: keeps every other panel hidden and shows LoadingPanel first
+        /// (with its logo/dice pulse + spinning ring, started inside LoadingPanel.Show()).
+        /// Once its minimum display time has elapsed it fades out and hands off to the normal
+        /// GameTypeSelectionPanel flow. Falls back straight to ShowGameTypeMenu() if no
+        /// LoadingPanel is assigned, so the game still boots without one.
+        /// </summary>
+        private void ShowLoadingScreenThenGameTypeMenu()
+        {
+            if (gameTypePanel != null) gameTypePanel.SetActive(false);
+
+            if (loadingPanel != null)
+                loadingPanel.Show(() => loadingPanel.Hide(ShowGameTypeMenu));
+            else
+                ShowGameTypeMenu();
         }
 
         private void AutoFindReferences()
