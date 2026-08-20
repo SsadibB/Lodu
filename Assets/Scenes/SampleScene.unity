@@ -4978,9 +4978,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Ludu.Core.SnakeLadderPawn
   board: {fileID: 1728775156}
   entryRoll: 6
-  stackOffsetDistance: 14
+  stackOffsetDistance: 25
   stackedScaleMultiplier: 0.65
-  startStackOffsetScale: 0.25
+  startStackOffsetScale: 0.4
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
@@ -18563,9 +18563,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Ludu.Core.SnakeLadderPawn
   board: {fileID: 1728775156}
   entryRoll: 6
-  stackOffsetDistance: 14
+  stackOffsetDistance: 25
   stackedScaleMultiplier: 0.65
-  startStackOffsetScale: 0.25
+  startStackOffsetScale: 0.4
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
@@ -23881,9 +23881,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Ludu.Core.SnakeLadderPawn
   board: {fileID: 1728775156}
   entryRoll: 6
-  stackOffsetDistance: 20
+  stackOffsetDistance: 25
   stackedScaleMultiplier: 0.65
-  startStackOffsetScale: 0.5
+  startStackOffsetScale: 0.4
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
@@ -30159,8 +30159,8 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1224492687}
-  - {fileID: 1960170183}
   - {fileID: 223801625}
+  - {fileID: 1960170183}
   - {fileID: 917796442}
   m_Father: {fileID: 1728775155}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -39165,9 +39165,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Ludu.Core.SnakeLadderPawn
   board: {fileID: 1728775156}
   entryRoll: 6
-  stackOffsetDistance: 14
+  stackOffsetDistance: 25
   stackedScaleMultiplier: 0.65
-  startStackOffsetScale: 0.25
+  startStackOffsetScale: 0.4
   stepDuration: 0.18
   jumpPower: 15
   connectorPauseDuration: 0.25
